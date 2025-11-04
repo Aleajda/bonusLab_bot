@@ -1,0 +1,46 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# Logs
+*.log
+log/
+logs/
+
+# Cache / temp
+.DS_Store
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# Telegram / session files
+parser_session*
+*.session
+*.session-journal
+
+# Local data
+bonuslab.db
+media/
+downloads/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# System
+Thumbs.db
+desktop.ini
