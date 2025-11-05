@@ -61,8 +61,7 @@ def message_to_html(message):
     Преобразует сообщение в HTML, сохраняя форматирование и переносы строк.
     """
     text = message.message or ""
-    if not getattr(message, 'entities', None):
-        return escape(_remove_blacklist_from_segment(text))
+
 
     html = ""
     last = 0
@@ -72,10 +71,9 @@ def message_to_html(message):
 
         # Текст до сущности
         plain = text[last:ent.offset]
-        html += escape(_remove_blacklist_from_segment(plain))
+        html += escape(plain)
 
         part = text[ent.offset:ent.offset + ent.length]
-        part = _remove_blacklist_from_segment(part)
 
         # Обработка сущностей
         if isinstance(ent, MessageEntityTextUrl):
