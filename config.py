@@ -12,8 +12,6 @@ target_channel = '@bonuslab_ru'
 channels_to_parse = [
     '@big_bonus_wb',
     '@Big_Bonuss',
-    '@toporlive',
-    '@ecotopor',
     '@dengivshapke',
     '@ishopper',
     '@skidki',
@@ -30,6 +28,7 @@ blacklist_words = [
     '''💝 Скидочный  бот (http://t.me/Besplatno_skidki_bot)
 🎁 @skidki''',
     'Скидочный бот',
-    '@Ozon_skidky'
+    '@Ozon_skidky',
+    '💝 Скидочный бот (http://t.me/Besplatno_skidki_bot)'
 ]
 
