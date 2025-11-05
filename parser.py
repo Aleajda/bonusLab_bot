@@ -3,6 +3,8 @@ import os
 import asyncio
 import re
 from html import escape
+import regex  # pip install regex
+from html import escape
 from telethon import TelegramClient, events
 from telethon.tl.types import (
     MessageEntityTextUrl, MessageEntityUrl, MessageEntityBold,
@@ -30,9 +32,11 @@ def remove_blacklist_phrases(full_text: str) -> str:
     """
     Удаляет все фразы из blacklist из всего текста.
     Работает регистронезависимо и игнорирует пробелы/переносы между словами blacklist-фразы.
+    Также убирает лишние пустые строки в конце текста.
     """
     if not full_text:
         return full_text
+
     cleaned = full_text
     for bad in blacklist_words:
         if not bad:
@@ -43,12 +47,14 @@ def remove_blacklist_phrases(full_text: str) -> str:
         pattern = pattern.replace(r'\ ', r'[\s\u00A0]+')  # обычные и неразрывные пробелы
         pattern = pattern.replace(r'\n', r'[\s\u00A0]*')
         try:
-            cleaned = re.sub(pattern, ' ', cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
         except re.error:
-            cleaned = cleaned.replace(bad, ' ')
-    # чистим двойные пробелы, но сохраняем переносы
-    cleaned = re.sub(r'[ \t]+', ' ', cleaned)
-    return cleaned.strip()
+            cleaned = cleaned.replace(bad, '')
+
+    cleaned = re.sub(r'(\n\s*)+$', '', cleaned)
+
+    return cleaned
+
 
 
 def _remove_blacklist_from_segment(segment: str):
@@ -56,26 +62,36 @@ def _remove_blacklist_from_segment(segment: str):
     return remove_blacklist_phrases(segment)
 
 
+def utf16_to_python_index(s, utf16_index):
+    """
+    Конвертирует UTF-16 индекс в индекс Python строки.
+    """
+    idx = 0
+    count = 0
+    while idx < len(s) and count < utf16_index:
+        c = s[idx]
+        code = ord(c)
+        if code >= 0x10000:  # символ вне BMP занимает 2 UTF-16 единицы
+            count += 2
+        else:
+            count += 1
+        idx += 1
+    return idx
+
 def message_to_html(message):
-    """
-    Преобразует сообщение в HTML, сохраняя форматирование и переносы строк.
-    """
     text = message.message or ""
-
-
     html = ""
     last = 0
+
     for ent in sorted(message.entities, key=lambda e: e.offset):
-        if ent.offset > len(text):
-            continue
+        start = utf16_to_python_index(text, ent.offset)
+        end = utf16_to_python_index(text, ent.offset + ent.length)
 
-        # Текст до сущности
-        plain = text[last:ent.offset]
-        html += escape(plain)
+        # текст до сущности
+        html += escape(text[last:start])
+        part = text[start:end]
 
-        part = text[ent.offset:ent.offset + ent.length]
-
-        # Обработка сущностей
+        # обработка сущностей
         if isinstance(ent, MessageEntityTextUrl):
             html += f'<a href="{escape(ent.url)}">{escape(part)}</a>'
         elif isinstance(ent, MessageEntityUrl):
@@ -106,13 +122,10 @@ def message_to_html(message):
         else:
             html += escape(part)
 
-        last = ent.offset + ent.length
+        last = end
 
-    # Хвост после последней сущности
-    tail = text[last:]
-    html += escape(_remove_blacklist_from_segment(tail))
+    html += escape(_remove_blacklist_from_segment(text[last:]))
     return html
-
 
 async def download_media_from_messages(msgs):
     paths = []
