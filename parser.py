@@ -18,56 +18,70 @@ MEDIA_DIR = "media"
 client = TelegramClient('parser_session', api_id, api_hash)
 
 
+# ===============================================================
+# ============= УТИЛИТЫ =========================================
+# ===============================================================
+
 def ensure_media_dir():
     os.makedirs(MEDIA_DIR, exist_ok=True)
 
 
-def _remove_blacklist_from_segment(segment: str):
-    """Удаляет все фразы из blacklist из данного фрагмента (регистронезависимо)."""
-    if not segment:
-        return segment
-    cleaned = segment
+def remove_blacklist_phrases(full_text: str) -> str:
+    """
+    Удаляет все фразы из blacklist из всего текста.
+    Работает регистронезависимо и игнорирует пробелы/переносы между словами blacklist-фразы.
+    """
+    if not full_text:
+        return full_text
+    cleaned = full_text
     for bad in blacklist_words:
         if not bad:
             continue
-        # Use regex for case-insensitive replacement
+
+        # Экранируем шаблон и допускаем вариации пробелов/переносов
+        pattern = re.escape(bad)
+        pattern = pattern.replace(r'\ ', r'[\s\u00A0]+')  # обычные и неразрывные пробелы
+        pattern = pattern.replace(r'\n', r'[\s\u00A0]*')
         try:
-            cleaned = re.sub(re.escape(bad), '', cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(pattern, ' ', cleaned, flags=re.IGNORECASE)
         except re.error:
-            # fallback to simple replace if regex fails
-            cleaned = cleaned.replace(bad, '')
-    return cleaned
+            cleaned = cleaned.replace(bad, ' ')
+    # чистим двойные пробелы, но сохраняем переносы
+    cleaned = re.sub(r'[ \t]+', ' ', cleaned)
+    return cleaned.strip()
+
+
+def _remove_blacklist_from_segment(segment: str):
+    """Лёгкая версия удаления blacklist — для работы внутри message_to_html."""
+    return remove_blacklist_phrases(segment)
 
 
 def message_to_html(message):
     """
-    Convert Telethon Message and its entities to safe HTML.
-    Removes blacklist phrases only from visible text parts (not whole message blocking).
+    Преобразует сообщение в HTML, сохраняя форматирование и переносы строк.
     """
     text = message.message or ""
     if not getattr(message, 'entities', None):
-        # no entities — just remove blacklist and escape
         return escape(_remove_blacklist_from_segment(text))
 
     html = ""
     last = 0
     for ent in sorted(message.entities, key=lambda e: e.offset):
-        # plain text before entity
+        if ent.offset > len(text):
+            continue
+
+        # Текст до сущности
         plain = text[last:ent.offset]
-        plain = _remove_blacklist_from_segment(plain)
-        html += escape(plain)
+        html += escape(_remove_blacklist_from_segment(plain))
 
         part = text[ent.offset:ent.offset + ent.length]
         part = _remove_blacklist_from_segment(part)
 
-        # handle entity types
+        # Обработка сущностей
         if isinstance(ent, MessageEntityTextUrl):
-            url = getattr(ent, 'url', None) or ''
-            html += f'<a href="{escape(url)}">{escape(part)}</a>'
+            html += f'<a href="{escape(ent.url)}">{escape(part)}</a>'
         elif isinstance(ent, MessageEntityUrl):
-            # the entity contains a URL inside the text part
-            url = part
-            html += f'<a href="{escape(url)}">{escape(part)}</a>'
+            html += f'<a href="{escape(part)}">{escape(part)}</a>'
         elif isinstance(ent, MessageEntityBold):
             html += f"<b>{escape(part)}</b>"
         elif isinstance(ent, MessageEntityItalic):
@@ -78,12 +92,9 @@ def message_to_html(message):
             html += f"<pre>{escape(part)}</pre>"
         elif isinstance(ent, MessageEntityMentionName):
             uid = getattr(ent, 'user_id', None)
-            if uid:
-                html += f'<a href="tg://user?id={uid}">{escape(part)}</a>'
-            else:
-                html += escape(part)
+            html += f'<a href="tg://user?id={uid}">{escape(part)}</a>' if uid else escape(part)
         elif isinstance(ent, MessageEntityMention):
-            html += f"{escape(part)}"  # @username as plain text
+            html += escape(part)
         elif isinstance(ent, MessageEntityPhone):
             html += f'<a href="tel:{escape(part)}">{escape(part)}</a>'
         elif isinstance(ent, MessageEntityEmail):
@@ -99,9 +110,9 @@ def message_to_html(message):
 
         last = ent.offset + ent.length
 
+    # Хвост после последней сущности
     tail = text[last:]
-    tail = _remove_blacklist_from_segment(tail)
-    html += escape(tail)
+    html += escape(_remove_blacklist_from_segment(tail))
     return html
 
 
@@ -141,6 +152,11 @@ async def download_media_from_messages(msgs):
             print(f"[WARN] Не удалось скачать media {m.id}: {e}")
     return paths
 
+
+# ===============================================================
+# ============= ОБРАБОТЧИК НОВЫХ СООБЩЕНИЙ ======================
+# ===============================================================
+
 @client.on(events.NewMessage(chats=channels_to_parse))
 async def handler(event):
     try:
@@ -148,9 +164,13 @@ async def handler(event):
         channel = getattr(chat, 'username', None) or getattr(chat, 'title', 'unknown')
         orig_message_id = event.message.id
 
-        # Convert to HTML, removing only blacklist phrases
+        # Удаляем blacklist-фразы из всего текста ДО форматирования
+        raw_text = event.message.message or ""
+        event.message.message = remove_blacklist_phrases(raw_text)
+
+        # Конвертируем в HTML с сохранением форматирования
         text_html = message_to_html(event.message)
-        cleaned_text = ' '.join(text_html.split())
+        cleaned_text = text_html.strip()
 
         if not cleaned_text.strip():
             print(f"[FILTERED] Пост из @{channel} удалён из-за blacklist")
@@ -180,7 +200,7 @@ async def handler(event):
         if not has_video:
             media_paths = await download_media_from_messages(messages_for_post)
 
-        # ✅ Добавляем источник в конец текста
+        # Добавляем источник в конец текста
         if getattr(chat, 'username', None):
             source = f"\n\n📢 Источник: @{chat.username}"
         else:
@@ -189,6 +209,7 @@ async def handler(event):
 
         post_id = save_post(channel, orig_message_id, cleaned_text, media_paths or [], has_video)
 
+        # Переименовываем медиа
         if media_paths:
             new_paths = []
             for idx, p in enumerate(media_paths):
@@ -215,6 +236,9 @@ async def handler(event):
         print(f"[ERROR parser handler] {e}")
 
 
+# ===============================================================
+# ============= ЗАПУСК ПАРСЕРА =================================
+# ===============================================================
 
 async def run_parser():
     ensure_media_dir()
