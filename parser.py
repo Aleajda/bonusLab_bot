@@ -141,7 +141,6 @@ async def download_media_from_messages(msgs):
             print(f"[WARN] Не удалось скачать media {m.id}: {e}")
     return paths
 
-
 @client.on(events.NewMessage(chats=channels_to_parse))
 async def handler(event):
     try:
@@ -181,6 +180,13 @@ async def handler(event):
         if not has_video:
             media_paths = await download_media_from_messages(messages_for_post)
 
+        # ✅ Добавляем источник в конец текста
+        if getattr(chat, 'username', None):
+            source = f"\n\n📢 Источник: @{chat.username}"
+        else:
+            source = f"\n\n📢 Источник: {getattr(chat, 'title', 'Неизвестный канал')}"
+        cleaned_text = cleaned_text + source
+
         post_id = save_post(channel, orig_message_id, cleaned_text, media_paths or [], has_video)
 
         if media_paths:
@@ -207,6 +213,7 @@ async def handler(event):
 
     except Exception as e:
         print(f"[ERROR parser handler] {e}")
+
 
 
 async def run_parser():
