@@ -186,8 +186,7 @@ def publish_post(post_id: int) -> bool:
                 bot.copy_message(target_channel, owner_id, mid)
                 success = True
             except Exception as e:
-                # log and continue to try others; if all fail, we'll fallback below
-                print(f"[WARN] copy_message failed for mid {mid}: {e}")
+                success = False
     # If nothing was copied successfully, use fallback
     if not success:
         try:
