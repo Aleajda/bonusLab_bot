@@ -17,7 +17,17 @@ channels_to_parse = [
     '@skidki',
     '@alikzbs_aliexpress',
     '@ozon_skidky',
-    '@AleajdaTest'
+    '@AleajdaTest',
+    '@tanjarus',
+    '@wowskidka1',
+    '@skidki_piter_moskva',
+    '@aliexpress_myskidka',
+    '@otkyda_cwb',
+    '@burostyle',
+    '@nedorogo_na_wb',
+    '@wbrchik',
+    '@skidkarai',
+    '@wb_skidkamam',
 ]
 
 # Фразы, которые нужно вырезать из текста
@@ -27,6 +37,17 @@ blacklist_words = [
     '🎁 @skidki',
     'Скидочный бот',
     '@Ozon_skidky',
-    '💝 Скидочный бот (http://t.me/Besplatno_skidki_bot)'
+    '💝 Скидочный бот (http://t.me/Besplatno_skidki_bot)',
+    'Секретные находки➡️@TANJARUS'
+    'Секретные находки',
+    '@TANJARUS',
+    'подписаться | откуда? с вб',
+    'подписаться | откуда? с вб (https://t.me/+zBln_Toslek2N2Iy)',
+    '✅ Больше находок wb с артикулами тут  (https://t.me/burostyle)',
+    '✅ Больше находок wb с артикулами тут',
+    'Больше находок wb с артикулами тут',
+    'Недорогой WB и OZON (https://t.me/+39v8PiWvXKQxOTI6)',
+    'Недорогой WB и OZON',
+    'Секретные находки➡️',
+    '@TANJARUS'
 ]
-
