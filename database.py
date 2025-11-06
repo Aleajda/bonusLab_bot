@@ -2,9 +2,33 @@
 import sqlite3
 import json
 import time
+import hashlib
 from typing import Optional, List
 
 DB_FILE = 'bonuslab.db'
+
+
+def get_text_hash(text: str) -> str:
+    """Получаем MD5 хэш нормализованного текста."""
+    normalized = ' '.join(text.lower().split())
+    return hashlib.md5(normalized.encode('utf-8')).hexdigest()
+
+def is_duplicate_post(text: str, similarity_threshold: float = 0.9) -> bool:
+    """Проверяет, есть ли в базе пост с похожим текстом."""
+    import difflib
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT text FROM posts WHERE status IN ('pending', 'published')")
+    rows = cur.fetchall()
+    conn.close()
+
+    new_text = ' '.join(text.lower().split())
+    for r in rows:
+        old_text = ' '.join((r['text'] or '').lower().split())
+        ratio = difflib.SequenceMatcher(None, new_text, old_text).ratio()
+        if ratio >= similarity_threshold:
+            return True
+    return False
 
 
 def get_conn():
@@ -121,3 +145,11 @@ def list_pending(limit=50):
     rows = cur.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def delete_post(post_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM posts WHERE id=?", (post_id,))
+    conn.commit()
+    conn.close()

@@ -3,8 +3,6 @@ import os
 import asyncio
 import re
 from html import escape
-import regex  # pip install regex
-from html import escape
 from telethon import TelegramClient, events
 from telethon.tl.types import (
     MessageEntityTextUrl, MessageEntityUrl, MessageEntityBold,
@@ -12,9 +10,12 @@ from telethon.tl.types import (
     MessageEntityMentionName, MessageEntityStrike, MessageEntityUnderline,
     MessageEntityPhone, MessageEntityEmail, MessageEntityMention, MessageEntityBotCommand
 )
-from config import api_id, api_hash, channels_to_parse, blacklist_words
-from database import post_exists, save_post, update_media_paths
-from bot import send_post_for_approval
+from config import api_id, api_hash, channels_to_parse, blacklist_words, AUTO_MODE, STOP_WORDS
+from database import (
+    post_exists, save_post, update_media_paths,
+    delete_post, get_conn
+)
+from bot import send_post_for_approval, publish_post
 
 MEDIA_DIR = "media"
 client = TelegramClient('parser_session', api_id, api_hash)
@@ -29,22 +30,17 @@ def ensure_media_dir():
 
 
 def remove_blacklist_phrases(full_text: str) -> str:
-    """
-    Удаляет все фразы из blacklist из всего текста.
-    Работает регистронезависимо и игнорирует пробелы/переносы между словами blacklist-фразы.
-    Также убирает лишние пустые строки в конце текста.
-    """
+    """Удаляет все фразы из blacklist из всего текста безопасно."""
     if not full_text:
         return full_text
 
     cleaned = full_text
     for bad in blacklist_words:
-        if not bad:
+        if not bad or not bad.strip():
             continue
 
-        # Экранируем шаблон и допускаем вариации пробелов/переносов
         pattern = re.escape(bad)
-        pattern = pattern.replace(r'\ ', r'[\s\u00A0]+')  # обычные и неразрывные пробелы
+        pattern = pattern.replace(r'\ ', r'[\s\u00A0]+')
         pattern = pattern.replace(r'\n', r'[\s\u00A0]*')
         try:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
@@ -52,46 +48,31 @@ def remove_blacklist_phrases(full_text: str) -> str:
             cleaned = cleaned.replace(bad, '')
 
     cleaned = re.sub(r'(\n\s*)+$', '', cleaned)
-
     return cleaned
 
 
-
-def _remove_blacklist_from_segment(segment: str):
-    """Лёгкая версия удаления blacklist — для работы внутри message_to_html."""
-    return remove_blacklist_phrases(segment)
-
-
 def utf16_to_python_index(s, utf16_index):
-    """
-    Конвертирует UTF-16 индекс в индекс Python строки.
-    """
     idx = 0
     count = 0
     while idx < len(s) and count < utf16_index:
         c = s[idx]
         code = ord(c)
-        if code >= 0x10000:  # символ вне BMP занимает 2 UTF-16 единицы
-            count += 2
-        else:
-            count += 1
+        count += 2 if code >= 0x10000 else 1
         idx += 1
     return idx
+
 
 def message_to_html(message):
     text = message.message or ""
     html = ""
     last = 0
 
-    for ent in sorted(message.entities, key=lambda e: e.offset):
+    for ent in sorted(message.entities or [], key=lambda e: e.offset):
         start = utf16_to_python_index(text, ent.offset)
         end = utf16_to_python_index(text, ent.offset + ent.length)
-
-        # текст до сущности
         html += escape(text[last:start])
         part = text[start:end]
 
-        # обработка сущностей
         if isinstance(ent, MessageEntityTextUrl):
             html += f'<a href="{escape(ent.url)}">{escape(part)}</a>'
         elif isinstance(ent, MessageEntityUrl):
@@ -121,11 +102,11 @@ def message_to_html(message):
             html += f"<u>{escape(part)}</u>"
         else:
             html += escape(part)
-
         last = end
 
-    html += escape(_remove_blacklist_from_segment(text[last:]))
+    html += escape(remove_blacklist_phrases(text[last:]))
     return html
+
 
 async def download_media_from_messages(msgs):
     paths = []
@@ -159,9 +140,23 @@ async def download_media_from_messages(msgs):
             await m.download_media(file=path)
             if os.path.exists(path):
                 paths.append(path)
-        except Exception as e:
-            print(f"[WARN] Не удалось скачать media {m.id}: {e}")
+        except Exception:
+            pass
     return paths
+
+
+# ===============================================================
+# ============= ПРОВЕРКА ДУБЛИКАТОВ =============================
+# ===============================================================
+
+def is_exact_duplicate(text: str) -> bool:
+    """Проверяет, есть ли пост с точно таким же текстом."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM posts WHERE TRIM(text)=?", (text.strip(),))
+    res = cur.fetchone()
+    conn.close()
+    return res is not None
 
 
 # ===============================================================
@@ -175,16 +170,17 @@ async def handler(event):
         channel = getattr(chat, 'username', None) or getattr(chat, 'title', 'unknown')
         orig_message_id = event.message.id
 
-        # Удаляем blacklist-фразы из всего текста ДО форматирования
+        # чистим blacklist
         raw_text = event.message.message or ""
         event.message.message = remove_blacklist_phrases(raw_text)
-
-        # Конвертируем в HTML с сохранением форматирования
         text_html = message_to_html(event.message)
         cleaned_text = text_html.strip()
 
         if not cleaned_text.strip():
-            print(f"[FILTERED] Пост из @{channel} удалён из-за blacklist")
+            return
+
+        # стоп-слова
+        if any(word.lower() in cleaned_text.lower() for word in STOP_WORDS):
             return
 
         if post_exists(channel, orig_message_id):
@@ -195,8 +191,7 @@ async def handler(event):
         if grouped_id:
             recent = await client.get_messages(event.chat_id, limit=20)
             group_msgs = [m for m in recent if getattr(m, 'grouped_id', None) == grouped_id]
-            group_msgs = sorted(group_msgs, key=lambda m: m.id)
-            messages_for_post = group_msgs
+            messages_for_post = sorted(group_msgs, key=lambda m: m.id)
 
         has_video = any(
             getattr(m, 'video', None) or (
@@ -211,16 +206,22 @@ async def handler(event):
         if not has_video:
             media_paths = await download_media_from_messages(messages_for_post)
 
-        # Добавляем источник в конец текста
+        # источник
         if getattr(chat, 'username', None):
             source = f"\n\n📢 Источник: @{chat.username}"
         else:
             source = f"\n\n📢 Источник: {getattr(chat, 'title', 'Неизвестный канал')}"
-        cleaned_text = cleaned_text + source
+        cleaned_text += source
 
+        # проверка на точный дубликат
+        if is_exact_duplicate(cleaned_text):
+            print(f"[SKIP] Точный дубликат — @{channel}")
+            return
+
+        # сохраняем
         post_id = save_post(channel, orig_message_id, cleaned_text, media_paths or [], has_video)
 
-        # Переименовываем медиа
+        # переименование медиа
         if media_paths:
             new_paths = []
             for idx, p in enumerate(media_paths):
@@ -241,7 +242,11 @@ async def handler(event):
             update_media_paths(post_id, new_paths)
             media_paths = new_paths
 
-        send_post_for_approval(post_id, cleaned_text, media_paths)
+        # публикация / отправка на модерацию
+        if AUTO_MODE:
+            publish_post(post_id)
+        else:
+            send_post_for_approval(post_id, cleaned_text, media_paths)
 
     except Exception as e:
         print(f"[ERROR parser handler] {e}")
