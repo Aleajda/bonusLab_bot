@@ -207,11 +207,11 @@ async def handler(event):
             media_paths = await download_media_from_messages(messages_for_post)
 
         # источник
-        if getattr(chat, 'username', None):
-            source = f"\n\n📢 Источник: @{chat.username}"
-        else:
-            source = f"\n\n📢 Источник: {getattr(chat, 'title', 'Неизвестный канал')}"
-        cleaned_text += source
+        # if getattr(chat, 'username', None):
+        #     source = f"\n\n📢 Источник: @{chat.username}"
+        # else:
+        #     source = f"\n\n📢 Источник: {getattr(chat, 'title', 'Неизвестный канал')}"
+        # cleaned_text += source
 
         # проверка на точный дубликат
         if is_exact_duplicate(cleaned_text):

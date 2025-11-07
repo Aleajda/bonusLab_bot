@@ -1,13 +1,13 @@
 # Конфигурация Telegram и каналов
 
-api_id = 23247724
-api_hash = '3cc500af4e4261a9e8d4545ba6b2448e'
+api_id = 24669542
+api_hash = '98c1f90abd5beff27c296f8527a08e9a'
 bot_token = '8309282218:AAEm05CWWPobe8ZfT0onXX1FGy66pP--YYg'
 
 
 
 # ID владельца и канал для публикаций
-owner_id = 398958635
+owner_id = 6890932879
 target_channel = '@bonuslab_ru'
 
 # Каналы, которые парсим
