@@ -2,7 +2,7 @@
 import os
 import json
 from telebot import TeleBot, types
-from config import bot_token, owner_id, target_channel
+from config import bot_token, owner_id, target_channel, SEND_LOGS
 from database import get_post, update_status, set_owner_message_ids, get_owner_message_ids
 
 bot = TeleBot(bot_token, parse_mode='HTML')
@@ -124,7 +124,8 @@ def handle_callback(call):
         elif cmd == "reject":
             update_status(post_id, 'rejected')
             bot.answer_callback_query(call.id, "Отклонено")
-            bot.send_message(owner_id, f"🚫 Post {post_id} отклонён.")
+            if SEND_LOGS:
+                bot.send_message(owner_id, f"🚫 Post {post_id} отклонён.")
         else:
             bot.answer_callback_query(call.id, "Неизвестная команда")
     except Exception as e:
@@ -194,12 +195,51 @@ def publish_post(post_id: int) -> bool:
             success = True
         except Exception as e:
             update_status(post_id, 'error')
-            bot.send_message(owner_id, f"❌ Ошибка при публикации post {post_id}: {e}")
+            if SEND_LOGS:
+                bot.send_message(owner_id, f"❌ Ошибка при публикации post {post_id}: {e}")
             return False
 
     update_status(post_id, 'published')
-    bot.send_message(owner_id, f"✅ Post {post_id} опубликован.")
+    if SEND_LOGS:
+        bot.send_message(owner_id, f"✅ Post {post_id} опубликован.")
     return True
+
+
+
+def send_alert(text: str, media_paths=None):
+    from config import ALERT_TO
+    try:
+        media_paths = [p for p in (media_paths or []) if p and os.path.exists(p)]
+        if media_paths:
+            media_group = []
+            files = []
+            try:
+                for i, path in enumerate(media_paths):
+                    ext = os.path.splitext(path)[1].lower()
+                    f = open(path, 'rb')
+                    files.append(f)
+                    if ext in ('.mp4', '.mov', '.mkv', '.webm'):
+                        media = types.InputMediaVideo(f)
+                    else:
+                        media = types.InputMediaPhoto(f)
+                    if i == 0:
+                        caption = text[:1024] + ("…" if len(text) > 1024 else "")
+                        media.caption = caption
+                    media_group.append(media)
+                bot.send_media_group(ALERT_TO, media_group)
+                if len(text) > 1024:
+                    bot.send_message(ALERT_TO, text[1024:])
+            finally:
+                for f in files:
+                    try:
+                        f.close()
+                    except:
+                        pass
+        else:
+            bot.send_message(ALERT_TO, text)
+    except Exception as e:
+        print(f"[ALERT ERROR] Не удалось отправить уведомление: {e}")
+
 
 
 def run_bot():

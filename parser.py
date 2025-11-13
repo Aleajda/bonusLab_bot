@@ -10,12 +10,12 @@ from telethon.tl.types import (
     MessageEntityMentionName, MessageEntityStrike, MessageEntityUnderline,
     MessageEntityPhone, MessageEntityEmail, MessageEntityMention, MessageEntityBotCommand
 )
-from config import api_id, api_hash, channels_to_parse, blacklist_words, AUTO_MODE, STOP_WORDS
+from config import api_id, api_hash, channels_to_parse, blacklist_words, AUTO_MODE, STOP_WORDS, ALERT_WORDS
 from database import (
     post_exists, save_post, update_media_paths,
     delete_post, get_conn
 )
-from bot import send_post_for_approval, publish_post
+from bot import send_post_for_approval, publish_post, send_alert
 
 MEDIA_DIR = "media"
 client = TelegramClient('parser_session', api_id, api_hash)
@@ -70,6 +70,15 @@ def message_to_html(message):
     for ent in sorted(message.entities or [], key=lambda e: e.offset):
         start = utf16_to_python_index(text, ent.offset)
         end = utf16_to_python_index(text, ent.offset + ent.length)
+
+        # --- FIX: защита от перекрывающихся/повторных сущностей ---
+        if end <= last:
+            continue
+        if start < last:
+            start = last
+        # ---------------------------------------------------------
+
+
         html += escape(text[last:start])
         part = text[start:end]
 
@@ -104,7 +113,11 @@ def message_to_html(message):
             html += escape(part)
         last = end
 
-    html += escape(remove_blacklist_phrases(text[last:]))
+    # html += escape(remove_blacklist_phrases(text[last:]))
+
+    if last < len(text):
+        html += escape(text[last:])
+
     return html
 
 
@@ -183,8 +196,19 @@ async def handler(event):
         if any(word.lower() in cleaned_text.lower() for word in STOP_WORDS):
             return
 
+        for word in ALERT_WORDS:
+            if word.lower() in cleaned_text.lower():
+                alert_text = f"⚠️ Найдено ключевое слово <b>{word}</b> в посте из @{channel or 'неизвестного канала'}:\n\n{cleaned_text}"
+                try:
+                    send_alert(alert_text, None)
+                except Exception as e:
+                    print(f"[ALERT ERROR] {e}")
+                break
+
         if post_exists(channel, orig_message_id):
             return
+
+
 
         grouped_id = getattr(event.message, 'grouped_id', None)
         messages_for_post = [event.message]
