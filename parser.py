@@ -2,6 +2,7 @@
 import os
 import asyncio
 import re
+import difflib
 from html import escape
 from telethon import TelegramClient, events
 from telethon.tl.types import (
@@ -24,6 +25,41 @@ client = TelegramClient('parser_session', api_id, api_hash)
 # ===============================================================
 # ============= УТИЛИТЫ =========================================
 # ===============================================================
+
+
+
+def is_similar_duplicate(text: str, threshold: float = 0.5) -> bool:
+    """
+    Проверяет, есть ли в БД текст, похожий на данный более чем на threshold (0..1).
+    Использует коэффициент схожести SequenceMatcher.
+    """
+
+    if not text or not text.strip():
+        return False
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    # Загружаем все тексты постов
+    cur.execute("SELECT text FROM posts")
+    rows = cur.fetchall()
+    conn.close()
+
+    text_cleaned = text.strip()
+
+    for (db_text,) in rows:
+        db_text_cleaned = (db_text or "").strip()
+        if not db_text_cleaned:
+            continue
+
+        similarity = difflib.SequenceMatcher(None, text_cleaned, db_text_cleaned).ratio()
+
+        if similarity >= threshold:
+            print(f"[SIMILAR] Найден похожий пост (similarity={similarity:.2f})")
+            return True
+
+    return False
+
 
 def ensure_media_dir():
     os.makedirs(MEDIA_DIR, exist_ok=True)
@@ -183,6 +219,10 @@ async def handler(event):
         channel = getattr(chat, 'username', None) or getattr(chat, 'title', 'unknown')
         orig_message_id = event.message.id
 
+        if event.message.fwd_from:
+            print(f"[SKIP] Пересланное сообщение в @{channel}")
+            return
+
         # чистим blacklist
         raw_text = event.message.message or ""
         event.message.message = remove_blacklist_phrases(raw_text)
@@ -217,6 +257,24 @@ async def handler(event):
             group_msgs = [m for m in recent if getattr(m, 'grouped_id', None) == grouped_id]
             messages_for_post = sorted(group_msgs, key=lambda m: m.id)
 
+
+        # --- ПРОВЕРКА: пропускать посты без ссылок и без фото ---
+        has_link = any(isinstance(ent, (MessageEntityUrl, MessageEntityTextUrl))
+                    for m in messages_for_post
+                    for ent in (m.entities or []))
+
+        has_photo = any(
+            getattr(m, 'photo', None) or
+            (getattr(m, 'media', None) and getattr(m.media, 'photo', None))
+            for m in messages_for_post
+        )
+
+        # если нет ссылок И нет фото — пропускаем
+        if not has_link and not has_photo:
+            print(f"[SKIP] Нет ссылок и фото — @{channel}")
+            return
+        # ----------------------------------------------------------
+
         has_video = any(
             getattr(m, 'video', None) or (
                 getattr(m, 'media', None)
@@ -225,6 +283,12 @@ async def handler(event):
             )
             for m in messages_for_post
         )
+
+
+        # если есть видео — пропускаем
+        if  has_video:
+            print(f"[SKIP] Виде в посте — @{channel}")
+            return
 
         media_paths = []
         if not has_video:
@@ -241,6 +305,12 @@ async def handler(event):
         if is_exact_duplicate(cleaned_text):
             print(f"[SKIP] Точный дубликат — @{channel}")
             return
+
+
+        # проверка на 92%+ похожий дубликат
+        # if is_similar_duplicate(cleaned_text, threshold=0.92):
+        #     print(f"[SKIP] Похожий на 92%+ дубликат — @{channel}")
+        #     return
 
         # сохраняем
         post_id = save_post(channel, orig_message_id, cleaned_text, media_paths or [], has_video)

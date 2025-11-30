@@ -14,22 +14,20 @@ target_channel = '@bonuslab_ru'
 channels_to_parse = [
     '@big_bonus_wb',
     '@Big_Bonuss',
-    '@dengivshapke',
     '@ishopper',
     '@skidki',
-    '@alikzbs_aliexpress',
+    # '@alikzbs_aliexpress',
     '@ozon_skidky',
     '@AleajdaTest',
-    '@tanjarus',
     '@wowskidka1',
     '@skidki_piter_moskva',
     '@aliexpress_myskidka',
-    '@otkyda_cwb',
-    '@burostyle',
-    '@nedorogo_na_wb',
-    '@wbrchik',
+    # '@burostyle',
+    # '@nedorogo_na_wb',
+    # '@wbrchik',
     '@skidkarai',
     '@wb_skidkamam',
+    '@vandroukiru',
 ]
 
 # Фразы, которые нужно вырезать из текста
@@ -51,7 +49,9 @@ blacklist_words = [
     'Недорогой WB и OZON (https://t.me/+39v8PiWvXKQxOTI6)',
     'Недорогой WB и OZON',
     'Секретные находки➡️',
-    '@TANJARUS'
+    '@TANJARUS',
+    'чата',
+    'чат',
 ]
 
 
@@ -71,7 +71,11 @@ STOP_WORDS = [
     'подпишись', 'подпишитесь', 'участвую',
     'итоги', 'сертификат', 'кредит',
     'Столото', 'столото', 'выигрывай',
-    'канал', 'ссылка на канал', 'ВСЕ ПРОМОКОДЫ ЗДЕСЬ'
+    'канал', 'ссылка на канал', 'ВСЕ ПРОМОКОДЫ ЗДЕСЬ',
+    'Распаковка', 'автор', 'видео',
+    'wowskidka', 'Закрытый клуб', 'СберПрайм',
+    'бот', 'wowskidka', 'урвал', 'Сбер',
+    'кредитка', 'оформ',
 ]
 
 SEND_LOGS = False     # Включает/отключает уведомления владельцу о публикации и отклонении

@@ -90,7 +90,8 @@ def send_post_for_approval(post_id: int, text: str, media_paths=None):
             )
             sent_ids.append(info.message_id)
         else:
-            msg_ids = _send_long_message(owner_id, f"<b>Post ID:</b> {post_id}\n\n{text}", reply_markup=_make_controls(post_id))
+            msg_ids = _send_long_message(owner_id, f"<b>Post ID:</b> {post_id}\n\n{text}",
+                                         reply_markup=_make_controls(post_id))
             sent_ids.extend(msg_ids)
 
         set_owner_message_ids(post_id, sent_ids)
@@ -200,10 +201,19 @@ def publish_post(post_id: int) -> bool:
             return False
 
     update_status(post_id, 'published')
+
+    # 🔥 Удаляем медиа-файлы после успешной публикации
+    try:
+        for path in media_paths:
+            if path and os.path.exists(path):
+                os.remove(path)
+    except Exception as e:
+        if SEND_LOGS:
+            bot.send_message(owner_id, f"⚠ Ошибка при удалении медиа: {e}")
+
     if SEND_LOGS:
         bot.send_message(owner_id, f"✅ Post {post_id} опубликован.")
     return True
-
 
 
 def send_alert(text: str, media_paths=None):
@@ -239,7 +249,6 @@ def send_alert(text: str, media_paths=None):
             bot.send_message(ALERT_TO, text)
     except Exception as e:
         print(f"[ALERT ERROR] Не удалось отправить уведомление: {e}")
-
 
 
 def run_bot():
