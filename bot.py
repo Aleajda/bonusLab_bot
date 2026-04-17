@@ -9,7 +9,7 @@ from config import (
 )
 from database import (
     get_post, update_status, set_owner_message_ids, get_owner_message_ids,
-    get_status_counts, get_auto_mode, set_auto_mode
+    get_status_counts, get_auto_mode, set_auto_mode, list_recent_reviewed_posts
 )
 
 apihelper.proxy = {
@@ -42,6 +42,13 @@ def _format_stats_text():
     )
 
 
+def _short20(text: str) -> str:
+    clean = " ".join((text or "").split())
+    if len(clean) <= 20:
+        return clean
+    return clean[:20]
+
+
 @bot.message_handler(commands=['start'])
 def start_handler(message):
     if message.from_user.id != owner_id:
@@ -51,7 +58,8 @@ def start_handler(message):
         "Команды:\n"
         "/mode auto — автопубликация\n"
         "/mode manual — модерация вручную\n"
-        "/stats — статистика"
+        "/stats — статистика\n"
+        "/last50 — последние 50 постов"
     )
 
 
@@ -88,6 +96,28 @@ def mode_handler(message):
         return
 
     bot.send_message(message.chat.id, "Неверный режим. Используй: /mode auto или /mode manual")
+
+
+@bot.message_handler(commands=['last50'])
+def last50_handler(message):
+    if message.from_user.id != owner_id:
+        return
+
+    rows = list_recent_reviewed_posts(limit=50)
+    if not rows:
+        bot.send_message(message.chat.id, "Нет опубликованных или отклоненных постов.")
+        return
+
+    lines = ["🗂 <b>Последние 50 постов</b>"]
+    for r in rows:
+        preview = _short20(r.get("text") or "")
+        if r.get("status") == "published":
+            lines.append(f"#{r['id']} | ✅ опубликован | {preview}")
+        else:
+            reason = (r.get("reject_reason") or "без причины").strip()
+            lines.append(f"#{r['id']} | ❌ отклонен | {preview} | причина: {reason}")
+
+    _send_long_message(message.chat.id, "\n".join(lines))
 
 
 def _split_text(text, limit=4096):
@@ -196,7 +226,7 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "Публикую…")
             publish_post(post_id)
         elif cmd == "reject":
-            update_status(post_id, 'rejected')
+            update_status(post_id, 'rejected', reject_reason="Отклонен администратором")
             bot.answer_callback_query(call.id, "Отклонено")
             if SEND_LOGS:
                 bot.send_message(owner_id, f"🚫 Post {post_id} отклонён.")

@@ -59,6 +59,7 @@ def init_db():
             has_video INTEGER DEFAULT 0,
             owner_message_ids TEXT,
             status TEXT DEFAULT 'pending',
+            reject_reason TEXT,
             created_at INTEGER
         )
     ''')
@@ -68,6 +69,10 @@ def init_db():
             value TEXT
         )
     ''')
+    cur.execute("PRAGMA table_info(posts)")
+    cols = [row["name"] for row in cur.fetchall()]
+    if "reject_reason" not in cols:
+        cur.execute("ALTER TABLE posts ADD COLUMN reject_reason TEXT")
     conn.commit()
     conn.close()
 
@@ -145,10 +150,13 @@ def get_owner_message_ids(post_id: int) -> List[int]:
         return []
 
 
-def update_status(post_id: int, status: str):
+def update_status(post_id: int, status: str, reject_reason: str = None):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE posts SET status=? WHERE id=?", (status, post_id))
+    cur.execute(
+        "UPDATE posts SET status=?, reject_reason=? WHERE id=?",
+        (status, reject_reason if status == "rejected" else None, post_id)
+    )
     conn.commit()
     conn.close()
 
@@ -216,6 +224,24 @@ def get_auto_mode(default: bool = False) -> bool:
     if not row:
         return bool(default)
     return str(row["value"]).strip() in ("1", "true", "True", "on", "yes")
+
+
+def list_recent_reviewed_posts(limit: int = 50):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, text, status, reject_reason, created_at
+        FROM posts
+        WHERE status IN ('published', 'rejected')
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (limit,)
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def delete_post(post_id):
