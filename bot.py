@@ -2,8 +2,20 @@
 import os
 import json
 from telebot import TeleBot, types
-from config import bot_token, owner_id, target_channel, SEND_LOGS
-from database import get_post, update_status, set_owner_message_ids, get_owner_message_ids
+from telebot import apihelper
+from config import (
+    bot_token, owner_id, target_channel, SEND_LOGS, AUTO_MODE,
+    TELEGRAM_PROXY_URL
+)
+from database import (
+    get_post, update_status, set_owner_message_ids, get_owner_message_ids,
+    get_status_counts, get_auto_mode, set_auto_mode
+)
+
+apihelper.proxy = {
+    "http": TELEGRAM_PROXY_URL,
+    "https": TELEGRAM_PROXY_URL
+}
 
 bot = TeleBot(bot_token, parse_mode='HTML')
 
@@ -15,6 +27,67 @@ def _make_controls(post_id: int):
         types.InlineKeyboardButton("❌ Отклонить", callback_data=f"reject:{post_id}")
     )
     return markup
+
+
+def _format_stats_text():
+    counts = get_status_counts()
+    mode_now = "Авто" if get_auto_mode(default=AUTO_MODE) else "Ручной"
+    return (
+        "📊 <b>Статистика</b>\n"
+        f"Режим: <b>{mode_now}</b>\n"
+        f"Pending: <b>{counts.get('pending', 0)}</b>\n"
+        f"Published: <b>{counts.get('published', 0)}</b>\n"
+        f"Rejected: <b>{counts.get('rejected', 0)}</b>\n"
+        f"Error: <b>{counts.get('error', 0)}</b>"
+    )
+
+
+@bot.message_handler(commands=['start'])
+def start_handler(message):
+    if message.from_user.id != owner_id:
+        return
+    bot.send_message(
+        message.chat.id,
+        "Команды:\n"
+        "/mode auto — автопубликация\n"
+        "/mode manual — модерация вручную\n"
+        "/stats — статистика"
+    )
+
+
+@bot.message_handler(commands=['stats'])
+def stats_handler(message):
+    if message.from_user.id != owner_id:
+        return
+    bot.send_message(message.chat.id, _format_stats_text())
+
+
+@bot.message_handler(commands=['mode'])
+def mode_handler(message):
+    if message.from_user.id != owner_id:
+        return
+
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        mode_now = "auto" if get_auto_mode(default=AUTO_MODE) else "manual"
+        bot.send_message(
+            message.chat.id,
+            f"Текущий режим: <b>{mode_now}</b>\n"
+            "Используй: /mode auto или /mode manual"
+        )
+        return
+
+    mode = parts[1].strip().lower()
+    if mode in ("auto", "on", "1"):
+        set_auto_mode(True)
+        bot.send_message(message.chat.id, "✅ Режим обновлён: <b>автопубликация</b>")
+        return
+    if mode in ("manual", "off", "0"):
+        set_auto_mode(False)
+        bot.send_message(message.chat.id, "✅ Режим обновлён: <b>ручная модерация</b>")
+        return
+
+    bot.send_message(message.chat.id, "Неверный режим. Используй: /mode auto или /mode manual")
 
 
 def _split_text(text, limit=4096):

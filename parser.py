@@ -2,7 +2,7 @@
 import os
 import asyncio
 import re
-import difflib
+import socks
 from html import escape
 from telethon import TelegramClient, events
 from telethon.tl.types import (
@@ -11,55 +11,41 @@ from telethon.tl.types import (
     MessageEntityMentionName, MessageEntityStrike, MessageEntityUnderline,
     MessageEntityPhone, MessageEntityEmail, MessageEntityMention, MessageEntityBotCommand
 )
-from config import api_id, api_hash, channels_to_parse, blacklist_words, AUTO_MODE, STOP_WORDS, ALERT_WORDS
+from config import (
+    api_id, api_hash, channels_to_parse, blacklist_words,
+    AUTO_MODE, STOP_WORDS, ALERT_WORDS,
+    TELEGRAM_PROXY_HOST, TELEGRAM_PROXY_PORT, TELEGRAM_PROXY_TYPE,
+    DUPLICATE_WINDOW_HOURS, IMAGE_DUPLICATE_THRESHOLD
+)
 from database import (
     post_exists, save_post, update_media_paths,
-    delete_post, get_conn
+    is_exact_duplicate_recent, is_similar_image_duplicate_recent,
+    get_auto_mode
 )
 from bot import send_post_for_approval, publish_post, send_alert
 
 MEDIA_DIR = "media"
-client = TelegramClient('parser_session', api_id, api_hash)
+_PROXY_TYPES = {
+    "http": socks.HTTP,
+    "socks4": socks.SOCKS4,
+    "socks5": socks.SOCKS5,
+}
+client = TelegramClient(
+    'parser_session',
+    api_id,
+    api_hash,
+    proxy=(
+        _PROXY_TYPES.get(TELEGRAM_PROXY_TYPE.lower(), socks.HTTP),
+        TELEGRAM_PROXY_HOST,
+        TELEGRAM_PROXY_PORT,
+        True,   # DNS через прокси
+    ),
+)
 
 
 # ===============================================================
 # ============= УТИЛИТЫ =========================================
 # ===============================================================
-
-
-
-def is_similar_duplicate(text: str, threshold: float = 0.5) -> bool:
-    """
-    Проверяет, есть ли в БД текст, похожий на данный более чем на threshold (0..1).
-    Использует коэффициент схожести SequenceMatcher.
-    """
-
-    if not text or not text.strip():
-        return False
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    # Загружаем все тексты постов
-    cur.execute("SELECT text FROM posts")
-    rows = cur.fetchall()
-    conn.close()
-
-    text_cleaned = text.strip()
-
-    for (db_text,) in rows:
-        db_text_cleaned = (db_text or "").strip()
-        if not db_text_cleaned:
-            continue
-
-        similarity = difflib.SequenceMatcher(None, text_cleaned, db_text_cleaned).ratio()
-
-        if similarity >= threshold:
-            print(f"[SIMILAR] Найден похожий пост (similarity={similarity:.2f})")
-            return True
-
-    return False
-
 
 def ensure_media_dir():
     os.makedirs(MEDIA_DIR, exist_ok=True)
@@ -195,20 +181,6 @@ async def download_media_from_messages(msgs):
 
 
 # ===============================================================
-# ============= ПРОВЕРКА ДУБЛИКАТОВ =============================
-# ===============================================================
-
-def is_exact_duplicate(text: str) -> bool:
-    """Проверяет, есть ли пост с точно таким же текстом."""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT 1 FROM posts WHERE TRIM(text)=?", (text.strip(),))
-    res = cur.fetchone()
-    conn.close()
-    return res is not None
-
-
-# ===============================================================
 # ============= ОБРАБОТЧИК НОВЫХ СООБЩЕНИЙ ======================
 # ===============================================================
 
@@ -294,6 +266,18 @@ async def handler(event):
         if not has_video:
             media_paths = await download_media_from_messages(messages_for_post)
 
+
+        duplicate_window_seconds = max(1, int(DUPLICATE_WINDOW_HOURS * 3600))
+
+        # проверка по изображению только в недавнем окне
+        if media_paths and is_similar_image_duplicate_recent(
+            media_paths,
+            threshold=IMAGE_DUPLICATE_THRESHOLD,
+            within_seconds=duplicate_window_seconds
+        ):
+            print(f"[SKIP] Похожее изображение найдено — @{channel}")
+            return
+
         # источник
         # if getattr(chat, 'username', None):
         #     source = f"\n\n📢 Источник: @{chat.username}"
@@ -301,8 +285,8 @@ async def handler(event):
         #     source = f"\n\n📢 Источник: {getattr(chat, 'title', 'Неизвестный канал')}"
         # cleaned_text += source
 
-        # проверка на точный дубликат
-        if is_exact_duplicate(cleaned_text):
+        # проверка на точный дубликат только в недавнем окне
+        if is_exact_duplicate_recent(cleaned_text, within_seconds=duplicate_window_seconds):
             print(f"[SKIP] Точный дубликат — @{channel}")
             return
 
@@ -337,7 +321,7 @@ async def handler(event):
             media_paths = new_paths
 
         # публикация / отправка на модерацию
-        if AUTO_MODE:
+        if get_auto_mode(default=AUTO_MODE):
             publish_post(post_id)
         else:
             send_post_for_approval(post_id, cleaned_text, media_paths)

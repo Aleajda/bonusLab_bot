@@ -4,6 +4,17 @@ api_id = 24669542
 api_hash = '98c1f90abd5beff27c296f8527a08e9a'
 bot_token = '8309282218:AAEm05CWWPobe8ZfT0onXX1FGy66pP--YYg'
 
+# Прокси для подключения к Telegram
+TELEGRAM_PROXY_HOST = "192.168.30.59"
+TELEGRAM_PROXY_PORT = 3128
+TELEGRAM_PROXY_TYPE = "http"
+TELEGRAM_PROXY_URL = f"http://{TELEGRAM_PROXY_HOST}:{TELEGRAM_PROXY_PORT}"
+
+# Окно антидубликатов (в часах): сравниваем только свежие посты
+DUPLICATE_WINDOW_HOURS = 3
+
+# Порог схожести изображений (меньше = строже)
+IMAGE_DUPLICATE_THRESHOLD = 12
 
 
 # ID владельца и канал для публикаций
@@ -16,15 +27,10 @@ channels_to_parse = [
     '@Big_Bonuss',
     '@ishopper',
     '@skidki',
-    # '@alikzbs_aliexpress',
     '@ozon_skidky',
     '@AleajdaTest',
-    '@wowskidka1',
     '@skidki_piter_moskva',
     '@aliexpress_myskidka',
-    # '@burostyle',
-    # '@nedorogo_na_wb',
-    # '@wbrchik',
     '@skidkarai',
     '@wb_skidkamam',
     '@vandroukiru',
@@ -75,7 +81,15 @@ STOP_WORDS = [
     'Распаковка', 'автор', 'видео',
     'wowskidka', 'Закрытый клуб', 'СберПрайм',
     'бот', 'wowskidka', 'урвал', 'Сбер',
-    'кредитка', 'оформ',
+    'кредитка', 'оформ', 'PREMIER',
+    'фильм', 'RUTUBE', 'новый релиз',
+    'яндекс музык', '45 дней', '60 дней',
+    'мегамаркет', 'Мегамаркет', 'Мегамар',
+    'афиш', 'купи', 'купить', 'заказать',
+    'оформи', 'оформить', 'переходи по ссылке',
+    'перейди по ссылке', 'жми', 'жми сюда',
+    'лови скидку', 'успей', 'успей купить',
+    'erid', 'риф', 'риф гош'
 ]
 
 SEND_LOGS = False     # Включает/отключает уведомления владельцу о публикации и отклонении

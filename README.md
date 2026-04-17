@@ -31,6 +31,10 @@ pip install -r requirements.txt
 - `bot_token` — токен вашего бота от [@BotFather](https://t.me/BotFather)
 - `owner_id` — ваш Telegram ID (можно узнать у @userinfobot)
 - `target_channel` — канал, куда публикуются одобренные посты
+- `TELEGRAM_PROXY_HOST`, `TELEGRAM_PROXY_PORT`, `TELEGRAM_PROXY_TYPE` — настройки прокси для подключения к Telegram API
+- `TELEGRAM_PROXY_URL` — единый URL прокси для всех HTTP(S)-запросов процесса
+- `DUPLICATE_WINDOW_HOURS` — окно антидубликатов (например, `3`, чтобы проверять только последние 3 часа)
+- `IMAGE_DUPLICATE_THRESHOLD` — чувствительность сравнения фото (по умолчанию `12`)
 
 Пример:
 
@@ -38,6 +42,12 @@ pip install -r requirements.txt
 bot_token = '1234567890:ABCDEF...'
 owner_id = 123456789
 target_channel = '@mychannel'
+TELEGRAM_PROXY_HOST = '192.168.30.59'
+TELEGRAM_PROXY_PORT = 3128
+TELEGRAM_PROXY_TYPE = 'http'
+TELEGRAM_PROXY_URL = 'http://192.168.30.59:3128'
+DUPLICATE_WINDOW_HOURS = 3
+IMAGE_DUPLICATE_THRESHOLD = 12
 ```
 
 ### 3️⃣ Настройка каналов для парсинга

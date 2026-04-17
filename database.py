@@ -4,6 +4,8 @@ import json
 import time
 import hashlib
 from typing import Optional, List
+from PIL import Image
+import imagehash
 
 DB_FILE = 'bonuslab.db'
 
@@ -12,6 +14,11 @@ def get_text_hash(text: str) -> str:
     """Получаем MD5 хэш нормализованного текста."""
     normalized = ' '.join(text.lower().split())
     return hashlib.md5(normalized.encode('utf-8')).hexdigest()
+
+
+def normalize_text(text: str) -> str:
+    return ' '.join((text or '').lower().split())
+
 
 def is_duplicate_post(text: str, similarity_threshold: float = 0.9) -> bool:
     """Проверяет, есть ли в базе пост с похожим текстом."""
@@ -47,11 +54,18 @@ def init_db():
             orig_message_id INTEGER,
             text TEXT,
             media_paths TEXT,
+            image_hashes TEXT,              -- NEW
             has_media INTEGER DEFAULT 0,
             has_video INTEGER DEFAULT 0,
             owner_message_ids TEXT,
             status TEXT DEFAULT 'pending',
             created_at INTEGER
+        )
+    ''')
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
         )
     ''')
     conn.commit()
@@ -70,12 +84,25 @@ def post_exists(channel: str, orig_message_id: int) -> bool:
 def save_post(channel: str, orig_message_id: int, text: str, media_paths: Optional[List[str]], has_video: bool) -> int:
     conn = get_conn()
     cur = conn.cursor()
+
+    # считаем хэши изображений
+    image_hash_list = []
+    if media_paths:
+        for p in media_paths:
+            h = calc_image_hash(p)
+            if h:
+                image_hash_list.append(h)
+
     media_json = json.dumps(media_paths or [])
+    hashes_json = json.dumps(image_hash_list)
+
     ts = int(time.time())
     cur.execute('''
-        INSERT INTO posts (channel, orig_message_id, text, media_paths, has_media, has_video, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (channel, orig_message_id, text, media_json, 1 if media_paths else 0, int(has_video), ts))
+        INSERT INTO posts (channel, orig_message_id, text, media_paths, image_hashes, has_media, has_video, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (channel, orig_message_id, text, media_json, hashes_json,
+          1 if media_paths else 0, int(has_video), ts))
+
     post_id = cur.lastrowid
     conn.commit()
     conn.close()
@@ -147,9 +174,173 @@ def list_pending(limit=50):
     return [dict(r) for r in rows]
 
 
+def get_status_counts():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT status, COUNT(*) AS cnt
+        FROM posts
+        GROUP BY status
+        """
+    )
+    rows = cur.fetchall()
+    conn.close()
+    counts = {"pending": 0, "published": 0, "rejected": 0, "error": 0}
+    for row in rows:
+        counts[row["status"]] = row["cnt"]
+    return counts
+
+
+def set_auto_mode(enabled: bool):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO settings(key, value)
+        VALUES('auto_mode', ?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value
+        """,
+        ("1" if enabled else "0",)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_auto_mode(default: bool = False) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM settings WHERE key='auto_mode'")
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return bool(default)
+    return str(row["value"]).strip() in ("1", "true", "True", "on", "yes")
+
+
 def delete_post(post_id):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("DELETE FROM posts WHERE id=?", (post_id,))
     conn.commit()
     conn.close()
+
+
+def calc_image_hash(path: str) -> str:
+    try:
+        img = Image.open(path)
+        return str(imagehash.phash(img))
+    except Exception:
+        return None
+
+
+def is_similar_image_duplicate(new_paths, threshold=12) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT image_hashes FROM posts WHERE image_hashes IS NOT NULL")
+    rows = cur.fetchall()
+    conn.close()
+
+    # читаем хэши новых изображений
+    new_hashes = []
+    for p in new_paths:
+        h = calc_image_hash(p)
+        if h:
+            new_hashes.append(imagehash.hex_to_hash(h))
+
+    if not new_hashes:
+        return False
+
+    # сравниваем с существующими
+    for row in rows:
+        if not row["image_hashes"]:
+            continue
+
+        try:
+            old_hashes = json.loads(row["image_hashes"])
+        except:
+            continue
+
+        for oh in old_hashes:
+            old_h = imagehash.hex_to_hash(oh)
+            for nh in new_hashes:
+                dist = old_h - nh
+                if dist <= threshold:
+                    print(f"[IMG DUP] расстояние = {dist}")
+                    return True
+
+    return False
+
+
+def is_exact_duplicate_recent(text: str, within_seconds: int) -> bool:
+    """Проверяет точный дубликат текста только в свежем окне времени."""
+    new_text = normalize_text(text)
+    if not new_text:
+        return False
+
+    since_ts = int(time.time()) - int(within_seconds)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT text
+        FROM posts
+        WHERE created_at >= ?
+          AND status IN ('pending', 'published')
+        """,
+        (since_ts,)
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    for row in rows:
+        if normalize_text(row["text"]) == new_text:
+            return True
+    return False
+
+
+def is_similar_image_duplicate_recent(new_paths, threshold=12, within_seconds=10800) -> bool:
+    """Проверяет дубликаты изображений только в свежем окне времени."""
+    since_ts = int(time.time()) - int(within_seconds)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT image_hashes
+        FROM posts
+        WHERE image_hashes IS NOT NULL
+          AND created_at >= ?
+          AND status IN ('pending', 'published')
+        """,
+        (since_ts,)
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    new_hashes = []
+    for p in new_paths:
+        h = calc_image_hash(p)
+        if h:
+            new_hashes.append(imagehash.hex_to_hash(h))
+
+    if not new_hashes:
+        return False
+
+    for row in rows:
+        if not row["image_hashes"]:
+            continue
+
+        try:
+            old_hashes = json.loads(row["image_hashes"])
+        except Exception:
+            continue
+
+        for oh in old_hashes:
+            old_h = imagehash.hex_to_hash(oh)
+            for nh in new_hashes:
+                dist = old_h - nh
+                if dist <= threshold:
+                    print(f"[IMG DUP RECENT] расстояние = {dist}")
+                    return True
+
+    return False
